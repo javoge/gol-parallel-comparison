@@ -1,0 +1,2 @@
+mode,rows,cols,steps,threads,time_s,time_per_step_ms,alive_end
+openmp,4096,4096,500,16,8.48516,16.9703,909293

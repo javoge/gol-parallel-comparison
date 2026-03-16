@@ -1,0 +1,2 @@
+mode,rows,cols,steps,procs,time_s,time_per_step_ms,alive_end
+mpi,4096,4096,500,8,9.3283,18.6566,909293
