@@ -137,8 +137,13 @@ Al finalizar una ejecucion, cada programa guarda un archivo de resultados en for
 - `results_mpi.txt`
 - `results_mixed.txt`
 - `results_cuda.txt`
+- `results_unified.csv`
 
-Estos archivos pueden abrirse luego con Excel, Python, R o cualquier herramienta de analisis para graficar tiempos, calcular speedup o comparar configuraciones.
+Los `results_*.txt` se van sobrescribiendo en cada corrida; el archivo `results_unified.csv` acumula todas las muestras (incluye semilla, run, warmup, hilos/procesos y kernel CUDA).
+
+Opcional: si corres `build_and_run.ps1` con `-MonitorResources`, se genera un CSV con uso de CPU/Memoria y metricas de GPU en `monitors/resource_session_YYYYMMDD_HHMMSS.csv`.
+
+Si ademas agregas `-MonitorPerCore`, se genera otro CSV con uso de CPU por nucleo (CPU logico) en `monitors/resource_per_core_YYYYMMDD_HHMMSS.csv`.
 
 ## Ejemplos de comparacion
 
@@ -158,7 +163,6 @@ Con este proyecto se pueden analizar escenarios como:
 
 ## Posibles mejoras futuras
 
-- exportar resultados a CSV unificado
 - agregar calculo explicito de speedup y eficiencia
 - incorporar visualizacion de la grilla
 - agregar scripts de graficos y analisis estadistico

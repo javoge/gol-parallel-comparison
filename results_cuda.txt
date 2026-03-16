@@ -1,2 +1,0 @@
-mode,rows,cols,steps,gpu,time_s,time_per_step_ms,alive_end
-cuda_shared,64,64,2,NVIDIA GeForce RTX 4070,0.0002029,0.10145,1196

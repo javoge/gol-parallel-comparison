@@ -16,15 +16,20 @@ param(
     [int]$COLS  = 1024,
     [int]$STEPS = 100,
     [int]$SEED  = 42,
-    [int[]]$Seeds,
-    [int[]]$OpenMPThreads,
-    [int[]]$MPIProcs = @(1, 2, 4, 8),
-    [int[]]$MixedMPIProcs = @(2, 4),
+    [string[]]$Seeds,
+    [string[]]$OpenMPThreads,
+    [string[]]$MPIProcs = @(1, 2, 4, 8),
+    [string[]]$MixedMPIProcs = @(2, 4),
     [int]$MixedThreads = 4,
     [int]$Repeats = 1,
     [int]$WarmupRuns = 0,
     [string]$UnifiedResultsFile = "results_unified.csv",
     [string]$CudaArch = "",
+    [switch]$MonitorResources,
+    [int]$MonitorIntervalMs = 250,
+    [int]$MonitorGpuIndex = 0,
+    [string]$MonitorDir = "monitors",
+    [switch]$MonitorPerCore,
     [switch]$BuildOnly,
     [switch]$RunOnly
 )
@@ -138,6 +143,34 @@ function Invoke-MPIProgram {
     & $MPIExec -n $Processes $resolvedExe @Arguments
 }
 
+function Parse-IntList {
+    param(
+        [object[]]$Values
+    )
+
+    if (-not $Values -or $Values.Count -eq 0) { return @() }
+
+    $tokens = @()
+    foreach ($v in $Values) {
+        if ($null -eq $v) { continue }
+        foreach ($t in ("$v" -split ",")) {
+            $s = $t.Trim()
+            if ($s) { $tokens += $s }
+        }
+    }
+
+    $out = @()
+    foreach ($t in $tokens) {
+        try {
+            $out += [int]$t
+        } catch {
+            throw "Valor invalido (se esperaba entero o lista separada por comas): '$t'"
+        }
+    }
+
+    return @($out)
+}
+
 function Get-ResultRecord {
     param(
         [string]$FilePath
@@ -219,6 +252,184 @@ function Reset-ResultFile {
     if (Test-Path $Path) {
         Remove-Item $Path -Force
     }
+}
+
+function Start-ResourceMonitorJob {
+    param(
+        [string]$OutputPath,
+        [int]$IntervalMs,
+        [int]$GpuIndex,
+        [string]$PerCoreOutputPath = "",
+        [int]$CoreCount = 0
+    )
+
+    $dir = Split-Path -Parent $OutputPath
+    if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir | Out-Null }
+
+    # Session-wide monitoring avoids distorting very short runs (e.g., CUDA kernel timing).
+    $header = "timestamp,cpu_total_pct,mem_avail_mb,gpu_util_pct,gpu_mem_util_pct,gpu_mem_used_mb,gpu_mem_total_mb,gpu_power_w,gpu_temp_c,gpu_clock_graphics_mhz,gpu_clock_sm_mhz"
+    $header | Out-File -FilePath $OutputPath -Encoding ASCII
+
+    if ($PerCoreOutputPath) {
+        $pcDir = Split-Path -Parent $PerCoreOutputPath
+        if (-not (Test-Path $pcDir)) { New-Item -ItemType Directory -Path $pcDir | Out-Null }
+        if ($CoreCount -lt 1) { $CoreCount = [Environment]::ProcessorCount }
+
+        $pcCols = @("timestamp")
+        for ($i = 0; $i -lt $CoreCount; $i++) { $pcCols += ("cpu_core_{0}_pct" -f $i) }
+        ($pcCols -join ",") | Out-File -FilePath $PerCoreOutputPath -Encoding ASCII
+    }
+
+    $job = Start-Job -ArgumentList $OutputPath, $IntervalMs, $GpuIndex, $PerCoreOutputPath, $CoreCount -ScriptBlock {
+        param($Path, $IntervalMs, $GpuIndex, $PerCorePath, $CoreCount)
+
+        $ErrorActionPreference = "SilentlyContinue"
+
+        function Get-CounterValueAny([string[]]$CounterPaths) {
+            foreach ($CounterPath in $CounterPaths) {
+                try {
+                    $c = Get-Counter -Counter $CounterPath -ErrorAction Stop
+                    if ($c -and $c.CounterSamples -and $c.CounterSamples.Count -gt 0) {
+                        return [double]$c.CounterSamples[0].CookedValue
+                    }
+                } catch {}
+            }
+            return $null
+        }
+
+        function Get-TotalCpuPct {
+            return Get-CounterValueAny @(
+                "\Processor(_Total)\% Processor Time",
+                "\Procesador(_Total)\% de tiempo de procesador"
+            )
+        }
+
+        function Get-MemAvailMb {
+            return Get-CounterValueAny @(
+                "\Memory\Available MBytes",
+                "\Memoria\Mbytes disponibles"
+            )
+        }
+
+        function Get-NvidiaSample([int]$GpuIndex) {
+            $nvsmi = (Get-Command nvidia-smi -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -First 1)
+            if (-not $nvsmi) { return $null }
+
+            $q = "utilization.gpu,utilization.memory,memory.used,memory.total,power.draw,temperature.gpu,clocks.gr,clocks.sm"
+            $line = & $nvsmi "--query-gpu=$q" "--format=csv,noheader,nounits" "-i" $GpuIndex 2>$null
+            if (-not $line) { return $null }
+
+            $parts = ($line -split ",") | ForEach-Object { $_.Trim() }
+            if ($parts.Count -lt 8) { return $null }
+
+            return [PSCustomObject]@{
+                gpu_util_pct = $parts[0]
+                gpu_mem_util_pct = $parts[1]
+                gpu_mem_used_mb = $parts[2]
+                gpu_mem_total_mb = $parts[3]
+                gpu_power_w = $parts[4]
+                gpu_temp_c = $parts[5]
+                gpu_clock_graphics_mhz = $parts[6]
+                gpu_clock_sm_mhz = $parts[7]
+            }
+        }
+
+        function Get-PerCoreCpu([int]$CoreCount) {
+            if ($CoreCount -lt 1) { return $null }
+
+            $paths = @(
+                "\Processor(*)\% Processor Time",
+                "\Procesador(*)\% de tiempo de procesador"
+            )
+
+            foreach ($path in $paths) {
+                try {
+                    $c = Get-Counter -Counter $path -ErrorAction Stop
+                    if (-not $c -or -not $c.CounterSamples) { continue }
+
+                    $map = @{}
+                    foreach ($s in $c.CounterSamples) {
+                        $name = $s.InstanceName
+                        if ($name -match '^\d+$') {
+                            $idx = [int]$name
+                            if ($idx -ge 0 -and $idx -lt $CoreCount) {
+                                $map[$idx] = [double]$s.CookedValue
+                            }
+                        }
+                    }
+                    return $map
+                } catch {}
+            }
+
+            return $null
+        }
+
+        while ($true) {
+            $ts = (Get-Date).ToString("o")
+            $cpu = Get-TotalCpuPct
+            $mem = Get-MemAvailMb
+            $gpu = Get-NvidiaSample -GpuIndex $GpuIndex
+
+            $row = [PSCustomObject]@{
+                timestamp = $ts
+                cpu_total_pct = $cpu
+                mem_avail_mb = $mem
+                gpu_util_pct = $gpu.gpu_util_pct
+                gpu_mem_util_pct = $gpu.gpu_mem_util_pct
+                gpu_mem_used_mb = $gpu.gpu_mem_used_mb
+                gpu_mem_total_mb = $gpu.gpu_mem_total_mb
+                gpu_power_w = $gpu.gpu_power_w
+                gpu_temp_c = $gpu.gpu_temp_c
+                gpu_clock_graphics_mhz = $gpu.gpu_clock_graphics_mhz
+                gpu_clock_sm_mhz = $gpu.gpu_clock_sm_mhz
+            }
+
+            $row |
+                Select-Object timestamp,cpu_total_pct,mem_avail_mb,gpu_util_pct,gpu_mem_util_pct,gpu_mem_used_mb,gpu_mem_total_mb,gpu_power_w,gpu_temp_c,gpu_clock_graphics_mhz,gpu_clock_sm_mhz |
+                ConvertTo-Csv -NoTypeInformation |
+                Select-Object -Skip 1 |
+                Add-Content -Path $Path -Encoding ASCII
+
+            if ($PerCorePath) {
+                if ($CoreCount -lt 1) { $CoreCount = [Environment]::ProcessorCount }
+                $cores = Get-PerCoreCpu -CoreCount $CoreCount
+
+                $pc = [ordered]@{ timestamp = $ts }
+                for ($i = 0; $i -lt $CoreCount; $i++) {
+                    $pc[("cpu_core_{0}_pct" -f $i)] = if ($cores -and $cores.ContainsKey($i)) { $cores[$i] } else { $null }
+                }
+
+                [PSCustomObject]$pc |
+                    ConvertTo-Csv -NoTypeInformation |
+                    Select-Object -Skip 1 |
+                    Add-Content -Path $PerCorePath -Encoding ASCII
+            }
+
+            Start-Sleep -Milliseconds $IntervalMs
+        }
+    }
+
+    # Best-effort: wait briefly for the first sample so short benchmark runs still get data.
+    $deadline = (Get-Date).AddSeconds(2)
+    while ((Get-Date) -lt $deadline) {
+        try {
+            $lines = Get-Content -Path $OutputPath -TotalCount 2 -ErrorAction SilentlyContinue
+            if ($lines -and $lines.Count -ge 2) { break }
+        } catch {}
+        Start-Sleep -Milliseconds 50
+    }
+
+    return $job
+}
+
+function Stop-ResourceMonitorJob {
+    param(
+        [System.Management.Automation.Job]$Job
+    )
+
+    if (-not $Job) { return }
+    try { Stop-Job -Job $Job -Force -ErrorAction SilentlyContinue | Out-Null } catch {}
+    try { Remove-Job -Job $Job -Force -ErrorAction SilentlyContinue | Out-Null } catch {}
 }
 
 # =============================================================
@@ -304,7 +515,7 @@ if (-not $BuildOnly) {
     }
 
     $seedRuns = if ($Seeds -and $Seeds.Count -gt 0) {
-        @($Seeds | Select-Object -Unique)
+        @(Parse-IntList -Values $Seeds | Select-Object -Unique)
     } else {
         @($SEED)
     }
@@ -316,22 +527,40 @@ if (-not $BuildOnly) {
     Write-INFO "Grid: ${ROWS}x${COLS} | Pasos: $STEPS"
     Write-INFO "Semillas: $($seedRuns -join ', ') | Warmup: $WarmupRuns | Repeticiones: $Repeats"
     Write-INFO "Resultados unificados: $unifiedPath"
+
+    $monitorJob = $null
+    $monitorPath = $null
+    if ($MonitorResources) {
+        $stamp = (Get-Date).ToString("yyyyMMdd_HHmmss")
+        $monitorPath = Join-Path $SCRIPT_ROOT (Join-Path $MonitorDir ("resource_session_{0}.csv" -f $stamp))
+        Write-INFO "Monitoreo de recursos habilitado: $monitorPath (cada ${MonitorIntervalMs}ms)"
+
+        $perCorePath = ""
+        if ($MonitorPerCore) {
+            $perCorePath = Join-Path $SCRIPT_ROOT (Join-Path $MonitorDir ("resource_per_core_{0}.csv" -f $stamp))
+            Write-INFO "Monitoreo por nucleo habilitado: $perCorePath"
+        }
+
+        $monitorJob = Start-ResourceMonitorJob -OutputPath $monitorPath -IntervalMs $MonitorIntervalMs -GpuIndex $MonitorGpuIndex -PerCoreOutputPath $perCorePath -CoreCount ([Environment]::ProcessorCount)
+    }
+
     $mpi = Find-MPI
 
     # Numero de hilos logicos visibles para el proceso
     $THREADS = [Environment]::ProcessorCount
     $threadRuns = if ($OpenMPThreads) {
-        @($OpenMPThreads | Where-Object { $_ -ge 1 } | Select-Object -Unique)
+        @(Parse-IntList -Values $OpenMPThreads | Where-Object { $_ -ge 1 } | Select-Object -Unique)
     } else {
         Get-DefaultThreadCounts -MaxThreads $THREADS
     }
 
-    foreach ($seedValue in $seedRuns) {
-        Write-Header "Semilla $seedValue"
+    try {
+        foreach ($seedValue in $seedRuns) {
+            Write-Header "Semilla $seedValue"
 
-        for ($run = 1; $run -le $totalRunsPerConfig; $run++) {
-            $isWarmup = ($run -le $WarmupRuns)
-            $runLabel = if ($isWarmup) { "warmup $run/$WarmupRuns" } else { "muestra $($run - $WarmupRuns)/$Repeats" }
+            for ($run = 1; $run -le $totalRunsPerConfig; $run++) {
+                $isWarmup = ($run -le $WarmupRuns)
+                $runLabel = if ($isWarmup) { "warmup $run/$WarmupRuns" } else { "muestra $($run - $WarmupRuns)/$Repeats" }
 
             # 1. Secuencial
             Write-Header "1/5 - Secuencial ($runLabel)"
@@ -375,7 +604,7 @@ if (-not $BuildOnly) {
 
             # 3. MPI (varios conteos de procesos)
             Write-Header "3/5 - MPI ($runLabel)"
-            foreach ($p in $MPIProcs | Where-Object { $_ -ge 1 } | Select-Object -Unique) {
+            foreach ($p in (Parse-IntList -Values $MPIProcs | Where-Object { $_ -ge 1 } | Select-Object -Unique)) {
                 if ($mpi.Exec -and (Test-Path "$BIN\gol_mpi.exe")) {
                     Write-INFO "--- $p procesos ---"
                     $resultFile = Join-Path $SCRIPT_ROOT "results_mpi.txt"
@@ -399,7 +628,7 @@ if (-not $BuildOnly) {
             # 4. Mixto MPI+OpenMP
             Write-Header "4/5 - Mixto (MPI+OpenMP) ($runLabel)"
             if ($mpi.Exec -and (Test-Path "$BIN\gol_mixed.exe")) {
-                foreach ($p in $MixedMPIProcs | Where-Object { $_ -ge 1 } | Select-Object -Unique) {
+                foreach ($p in (Parse-IntList -Values $MixedMPIProcs | Where-Object { $_ -ge 1 } | Select-Object -Unique)) {
                     Write-INFO "--- $p procesos / $MixedThreads hilos ---"
                     $resultFile = Join-Path $SCRIPT_ROOT "results_mixed.txt"
                     Reset-ResultFile -Path $resultFile
@@ -419,36 +648,42 @@ if (-not $BuildOnly) {
             if (-not $mpi.Exec) { Write-INFO "MPI no disponible. Se omite ejecucion mixta." }
             if (-not (Test-Path "$BIN\gol_mixed.exe")) { Write-INFO "Binario mixto no encontrado. Se omite." }
 
-            # 5. CUDA
-            Write-Header "5/5 - GPU CUDA ($runLabel)"
-            if (Test-Path "$BIN\gol_cuda.exe") {
-                Write-INFO "--- Kernel basico ---"
-                $resultFile = Join-Path $SCRIPT_ROOT "results_cuda.txt"
-                Reset-ResultFile -Path $resultFile
-                & "$BIN\gol_cuda.exe" $ROWS $COLS $STEPS $seedValue 0
-                if ($LASTEXITCODE -ne 0) {
-                    Write-ERR "Fallo CUDA kernel basico (exit code $LASTEXITCODE)."
-                } elseif (Test-Path $resultFile) {
-                    $rec = Get-ResultRecord -FilePath $resultFile
-                    Add-UnifiedResult -Path $unifiedPath -Record $rec -SeedValue $seedValue -RunIndex $run -IsWarmup $isWarmup -Kernel "basic" -Gpu $rec.gpu
-                } else {
-                    Write-ERR "No se genero results_cuda.txt para kernel basico."
-                }
+                # 5. CUDA
+                Write-Header "5/5 - GPU CUDA ($runLabel)"
+                if (Test-Path "$BIN\gol_cuda.exe") {
+                    Write-INFO "--- Kernel basico ---"
+                    $resultFile = Join-Path $SCRIPT_ROOT "results_cuda.txt"
+                    Reset-ResultFile -Path $resultFile
+                    & "$BIN\gol_cuda.exe" $ROWS $COLS $STEPS $seedValue 0
+                    if ($LASTEXITCODE -ne 0) {
+                        Write-ERR "Fallo CUDA kernel basico (exit code $LASTEXITCODE)."
+                    } elseif (Test-Path $resultFile) {
+                        $rec = Get-ResultRecord -FilePath $resultFile
+                        Add-UnifiedResult -Path $unifiedPath -Record $rec -SeedValue $seedValue -RunIndex $run -IsWarmup $isWarmup -Kernel "basic" -Gpu $rec.gpu
+                    } else {
+                        Write-ERR "No se genero results_cuda.txt para kernel basico."
+                    }
 
-                Write-INFO "--- Kernel con shared memory ---"
-                Reset-ResultFile -Path $resultFile
-                & "$BIN\gol_cuda.exe" $ROWS $COLS $STEPS $seedValue 1
-                if ($LASTEXITCODE -ne 0) {
-                    Write-ERR "Fallo CUDA kernel shared (exit code $LASTEXITCODE)."
-                } elseif (Test-Path $resultFile) {
-                    $rec = Get-ResultRecord -FilePath $resultFile
-                    Add-UnifiedResult -Path $unifiedPath -Record $rec -SeedValue $seedValue -RunIndex $run -IsWarmup $isWarmup -Kernel "shared" -Gpu $rec.gpu
+                    Write-INFO "--- Kernel con shared memory ---"
+                    Reset-ResultFile -Path $resultFile
+                    & "$BIN\gol_cuda.exe" $ROWS $COLS $STEPS $seedValue 1
+                    if ($LASTEXITCODE -ne 0) {
+                        Write-ERR "Fallo CUDA kernel shared (exit code $LASTEXITCODE)."
+                    } elseif (Test-Path $resultFile) {
+                        $rec = Get-ResultRecord -FilePath $resultFile
+                        Add-UnifiedResult -Path $unifiedPath -Record $rec -SeedValue $seedValue -RunIndex $run -IsWarmup $isWarmup -Kernel "shared" -Gpu $rec.gpu
+                    } else {
+                        Write-ERR "No se genero results_cuda.txt para kernel shared."
+                    }
                 } else {
-                    Write-ERR "No se genero results_cuda.txt para kernel shared."
+                    Write-INFO "Binario CUDA no encontrado. Se omite."
                 }
-            } else {
-                Write-INFO "Binario CUDA no encontrado. Se omite."
             }
+        }
+    } finally {
+        if ($MonitorResources) {
+            Stop-ResourceMonitorJob -Job $monitorJob
+            if ($monitorPath) { Write-OK "Monitoreo guardado en: $monitorPath" }
         }
     }
 
