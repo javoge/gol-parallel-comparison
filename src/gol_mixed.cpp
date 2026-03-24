@@ -13,10 +13,12 @@
 #include <cstdlib>
 #include <mpi.h>
 #include <omp.h>
+#include <cstdint>
+#include <random>
 
 using namespace std;
 
-int countNeighborsLocal(const vector<int>& flat, int i, int j,
+int countNeighborsLocal(const vector<uint8_t>& flat, int i, int j,
                          int local_rows, int cols) {
     int count = 0;
     for (int di = -1; di <= 1; di++) {
@@ -69,20 +71,21 @@ int main(int argc, char* argv[]) {
         offset       += r * COLS;
     }
 
-    vector<int> full_grid;
+    vector<uint8_t> full_grid;
     if (rank == 0) {
         full_grid.resize(ROWS * COLS);
-        srand(SEED);
+        mt19937 rng(SEED);
+        uniform_int_distribution<int> dist(0, 99);
         for (int i = 0; i < ROWS * COLS; i++)
-            full_grid[i] = (rand() % 100 < 30) ? 1 : 0;
+            full_grid[i] = (dist(rng) < 30) ? 1 : 0;
     }
 
     int total_buf = (local_rows + 2) * COLS;
-    vector<int> local(total_buf, 0);
-    vector<int> local_next(total_buf, 0);
+    vector<uint8_t> local(total_buf, 0);
+    vector<uint8_t> local_next(total_buf, 0);
 
-    MPI_Scatterv(full_grid.data(), sendcounts.data(), displs.data(), MPI_INT,
-                 &local[COLS], local_rows * COLS, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Scatterv(full_grid.data(), sendcounts.data(), displs.data(), MPI_UINT8_T,
+                 &local[COLS], local_rows * COLS, MPI_UINT8_T, 0, MPI_COMM_WORLD);
 
     int prev_rank = (rank - 1 + nprocs) % nprocs;
     int next_rank = (rank + 1) % nprocs;
@@ -92,11 +95,11 @@ int main(int argc, char* argv[]) {
 
     for (int s = 0; s < STEPS; s++) {
         // Comunicacion MPI (solo hilo principal)
-        MPI_Sendrecv(&local[COLS],                   COLS, MPI_INT, prev_rank, 0,
-                     &local[(local_rows+1)*COLS],    COLS, MPI_INT, next_rank, 0,
+        MPI_Sendrecv(&local[COLS],                   COLS, MPI_UINT8_T, prev_rank, 0,
+                     &local[(local_rows+1)*COLS],    COLS, MPI_UINT8_T, next_rank, 0,
                      MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        MPI_Sendrecv(&local[local_rows * COLS], COLS, MPI_INT, next_rank, 1,
-                     &local[0],                COLS, MPI_INT, prev_rank, 1,
+        MPI_Sendrecv(&local[local_rows * COLS], COLS, MPI_UINT8_T, next_rank, 1,
+                     &local[0],                COLS, MPI_UINT8_T, prev_rank, 1,
                      MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
         // Calculo paralelo con OpenMP

@@ -8,33 +8,35 @@
 #include <fstream>
 #include <string>
 #include <cstdlib>
+#include <cstdint>
+#include <random>
 
 using namespace std;
 using namespace chrono;
 
 // Cuenta vecinos vivos de la celda (i,j)
-int countNeighbors(const vector<vector<int>>& grid, int i, int j, int rows, int cols) {
+int countNeighbors(const vector<uint8_t>& grid, int i, int j, int rows, int cols) {
     int count = 0;
     for (int di = -1; di <= 1; di++) {
         for (int dj = -1; dj <= 1; dj++) {
             if (di == 0 && dj == 0) continue;
             int ni = (i + di + rows) % rows; // wrap-around toroidal
             int nj = (j + dj + cols) % cols;
-            count += grid[ni][nj];
+            count += grid[ni * cols + nj];
         }
     }
     return count;
 }
 
 // Ejecuta un paso de simulacion
-void step(const vector<vector<int>>& current, vector<vector<int>>& next, int rows, int cols) {
+void step(const vector<uint8_t>& current, vector<uint8_t>& next, int rows, int cols) {
     for (int i = 0; i < rows; i++) {
         for (int j = 0; j < cols; j++) {
             int neighbors = countNeighbors(current, i, j, rows, cols);
-            if (current[i][j] == 1) {
-                next[i][j] = (neighbors == 2 || neighbors == 3) ? 1 : 0;
+            if (current[i * cols + j] == 1) {
+                next[i * cols + j] = (neighbors == 2 || neighbors == 3) ? 1 : 0;
             } else {
-                next[i][j] = (neighbors == 3) ? 1 : 0;
+                next[i * cols + j] = (neighbors == 3) ? 1 : 0;
             }
         }
     }
@@ -49,19 +51,20 @@ int main(int argc, char* argv[]) {
     cout << "=== SECUENCIAL ===" << endl;
     cout << "Grid: " << ROWS << "x" << COLS << " | Steps: " << STEPS << endl;
 
-    // Inicializacion aleatoria
-    srand(SEED);
-    vector<vector<int>> grid(ROWS, vector<int>(COLS));
-    vector<vector<int>> next_grid(ROWS, vector<int>(COLS));
+    // Inicializacion aleatoria con mt19937 (determinista multiplataforma)
+    mt19937 rng(SEED);
+    uniform_int_distribution<int> dist(0, 99);
+    vector<uint8_t> grid(ROWS * COLS);
+    vector<uint8_t> next_grid(ROWS * COLS);
 
     for (int i = 0; i < ROWS; i++)
         for (int j = 0; j < COLS; j++)
-            grid[i][j] = (rand() % 100 < 30) ? 1 : 0; // 30% vivas
+            grid[i * COLS + j] = (dist(rng) < 30) ? 1 : 0; // 30% vivas
 
     long long alive_start = 0;
     for (int i = 0; i < ROWS; i++)
         for (int j = 0; j < COLS; j++)
-            alive_start += grid[i][j];
+            alive_start += grid[i * COLS + j];
 
     // Simulacion
     auto t_start = high_resolution_clock::now();
@@ -77,7 +80,7 @@ int main(int argc, char* argv[]) {
     long long alive_end = 0;
     for (int i = 0; i < ROWS; i++)
         for (int j = 0; j < COLS; j++)
-            alive_end += grid[i][j];
+            alive_end += grid[i * COLS + j];
 
     cout << "Celulas vivas al inicio: " << alive_start << endl;
     cout << "Celulas vivas al final:  " << alive_end << endl;

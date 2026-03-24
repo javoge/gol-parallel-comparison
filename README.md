@@ -63,18 +63,36 @@ Archivo: [`src/gol_cuda.cu`](src/gol_cuda.cu)
 - incluye un kernel basico
 - incluye un kernel optimizado con `shared memory`
 
+## Decisiones de implementacion
+
+### Memoria plana 1D
+
+Todas las versiones utilizan vectores unidimensionales (`vector<uint8_t>`) en lugar de matrices anidadas (`vector<vector<int>>`). Esto garantiza memoria contigua y mejora significativamente el aprovechamiento de la cache del procesador.
+
+El acceso a la celda `(i, j)` se realiza como `grid[i * COLS + j]`.
+
+### Tipo de dato `uint8_t`
+
+Cada celda se almacena como un entero sin signo de 8 bits. Esto reduce el consumo de RAM y VRAM en un 75% respecto a usar `int` (4 bytes por celda), y disminuye el ancho de banda necesario en las transferencias MPI y CUDA.
+
+### Generador aleatorio `mt19937`
+
+La inicializacion del tablero usa `std::mt19937` de C++11 en lugar del antiguo `rand()` de C. Esto garantiza que la misma semilla produzca exactamente el mismo tablero en cualquier compilador o sistema operativo, lo cual es esencial para comparar resultados entre paradigmas.
+
 ## Requisitos
 
-El proyecto esta preparado principalmente para Windows con PowerShell.
-
-### Requisitos de compilacion
+### Windows (PowerShell)
 
 - Visual Studio 2022 con soporte de C++
 - CUDA Toolkit
 - Microsoft MPI Runtime
 - Microsoft MPI SDK
 
-El script asume que estas herramientas estan disponibles en el sistema y en rutas estandar de Windows.
+### Linux / HPC
+
+- `g++` con soporte de C++17 y OpenMP
+- OpenMPI: `sudo apt install libopenmpi-dev openmpi-bin`
+- CUDA Toolkit: [developer.nvidia.com/cuda-downloads](https://developer.nvidia.com/cuda-downloads)
 
 ## Estructura del proyecto
 
@@ -86,36 +104,69 @@ gol-parallel-comparison/
 |  |- gol_mpi.cpp
 |  |- gol_mixed.cpp
 |  `- gol_cuda.cu
-|- build_and_run.ps1
+|- build_and_run.ps1   (Windows)
+|- Makefile            (Linux / HPC)
+|- plot_results.py     (Analisis y graficos)
 `- README.md
 ```
 
 ## Compilacion y ejecucion
 
+### Windows (PowerShell)
+
 El archivo principal para automatizar todo es [`build_and_run.ps1`](build_and_run.ps1).
 
-### Compilar y ejecutar benchmarks
-
 ```powershell
+# Compilar y ejecutar benchmarks
 .\build_and_run.ps1
-```
 
-### Compilar solamente
-
-```powershell
+# Solo compilar
 .\build_and_run.ps1 -BuildOnly
-```
 
-### Ejecutar solamente
-
-```powershell
+# Solo ejecutar
 .\build_and_run.ps1 -RunOnly
+
+# Parametros personalizados
+.\build_and_run.ps1 -ROWS 2048 -COLS 2048 -STEPS 500 -SEED 123
 ```
 
-### Ejecutar con parametros personalizados
+### Linux / HPC (Makefile)
 
-```powershell
-.\build_and_run.ps1 -ROWS 2048 -COLS 2048 -STEPS 500 -SEED 123
+```bash
+# Compilar todo
+make all
+
+# Compilar una variante especifica
+make sequential
+make openmp
+make mpi
+make mixed
+make cuda
+
+# Compilar y ejecutar benchmarks rapidos
+make run
+
+# Limpiar binarios
+make clean
+```
+
+## Analisis y graficos
+
+El script [`plot_results.py`](plot_results.py) procesa el archivo `results_unified.csv` generado por el benchmark y produce:
+
+- **`grafico_comparativa.png`**: comparativa general de tiempo de ejecucion entre todos los paradigmas
+- **`grafico_speedup_openmp.png`**: curva de aceleracion (speedup) de OpenMP vs cantidad de hilos
+
+### Requisitos
+
+```bash
+pip install pandas matplotlib seaborn
+```
+
+### Uso
+
+```bash
+python plot_results.py
 ```
 
 ## Que mide el benchmark
@@ -125,8 +176,6 @@ Cada implementacion reporta metricas como:
 - `time_s`: tiempo total de ejecucion
 - `time_per_step_ms`: tiempo promedio por iteracion
 - `alive_end`: cantidad de celulas vivas al finalizar
-
-La idea es comparar esas metricas entre versiones que resuelven el mismo problema.
 
 ## Archivos de salida
 
@@ -145,25 +194,10 @@ Opcional: si corres `build_and_run.ps1` con `-MonitorResources`, se genera un CS
 
 Si ademas agregas `-MonitorPerCore`, se genera otro CSV con uso de CPU por nucleo (CPU logico) en `monitors/resource_per_core_YYYYMMDD_HHMMSS.csv`.
 
-## Ejemplos de comparacion
-
-Con este proyecto se pueden analizar escenarios como:
-
-- secuencial vs OpenMP con 1, 2, 4, 8 o mas hilos
-- MPI con distinta cantidad de procesos
-- combinaciones hibridas de procesos MPI e hilos OpenMP
-- kernel CUDA basico vs kernel CUDA con `shared memory`
-
 ## Notas
 
-- la inicializacion de la grilla usa una semilla para reproducibilidad
+- la inicializacion de la grilla usa `std::mt19937` con semilla para reproducibilidad determinista en cualquier plataforma
 - la densidad inicial de celdas vivas es aproximadamente 30%
 - la logica usa vecindad de Moore de 8 vecinos
 - los bordes se manejan con comportamiento toroidal
-
-## Posibles mejoras futuras
-
-- agregar calculo explicito de speedup y eficiencia
-- incorporar visualizacion de la grilla
-- agregar scripts de graficos y analisis estadistico
-- incluir instrucciones para Linux
+- la memoria se almacena como arreglos planos 1D de tipo `uint8_t`

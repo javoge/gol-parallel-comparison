@@ -8,33 +8,35 @@
 #include <fstream>
 #include <cstdlib>
 #include <omp.h>
+#include <cstdint>
+#include <random>
 
 using namespace std;
 using namespace chrono;
 
-int countNeighbors(const vector<vector<int>>& grid, int i, int j, int rows, int cols) {
+int countNeighbors(const vector<uint8_t>& grid, int i, int j, int rows, int cols) {
     int count = 0;
     for (int di = -1; di <= 1; di++) {
         for (int dj = -1; dj <= 1; dj++) {
             if (di == 0 && dj == 0) continue;
             int ni = (i + di + rows) % rows;
             int nj = (j + dj + cols) % cols;
-            count += grid[ni][nj];
+            count += grid[ni * cols + nj];
         }
     }
     return count;
 }
 
-void stepParallel(const vector<vector<int>>& current, vector<vector<int>>& next, int rows, int cols) {
+void stepParallel(const vector<uint8_t>& current, vector<uint8_t>& next, int rows, int cols) {
     // Paralelizamos el loop externo: cada hilo procesa filas distintas
     #pragma omp parallel for schedule(static)
     for (int i = 0; i < rows; i++) {
         for (int j = 0; j < cols; j++) {
             int neighbors = countNeighbors(current, i, j, rows, cols);
-            if (current[i][j] == 1) {
-                next[i][j] = (neighbors == 2 || neighbors == 3) ? 1 : 0;
+            if (current[i * cols + j] == 1) {
+                next[i * cols + j] = (neighbors == 2 || neighbors == 3) ? 1 : 0;
             } else {
-                next[i][j] = (neighbors == 3) ? 1 : 0;
+                next[i * cols + j] = (neighbors == 3) ? 1 : 0;
             }
         }
     }
@@ -53,18 +55,19 @@ int main(int argc, char* argv[]) {
     cout << "Grid: " << ROWS << "x" << COLS << " | Steps: " << STEPS
          << " | Hilos: " << THREADS << endl;
 
-    srand(SEED);
-    vector<vector<int>> grid(ROWS, vector<int>(COLS));
-    vector<vector<int>> next_grid(ROWS, vector<int>(COLS));
+    mt19937 rng(SEED);
+    uniform_int_distribution<int> dist(0, 99);
+    vector<uint8_t> grid(ROWS * COLS);
+    vector<uint8_t> next_grid(ROWS * COLS);
 
     for (int i = 0; i < ROWS; i++)
         for (int j = 0; j < COLS; j++)
-            grid[i][j] = (rand() % 100 < 30) ? 1 : 0;
+            grid[i * COLS + j] = (dist(rng) < 30) ? 1 : 0;
 
     long long alive_start = 0;
     for (int i = 0; i < ROWS; i++)
         for (int j = 0; j < COLS; j++)
-            alive_start += grid[i][j];
+            alive_start += grid[i * COLS + j];
 
     auto t_start = high_resolution_clock::now();
 
@@ -79,7 +82,7 @@ int main(int argc, char* argv[]) {
     long long alive_end = 0;
     for (int i = 0; i < ROWS; i++)
         for (int j = 0; j < COLS; j++)
-            alive_end += grid[i][j];
+            alive_end += grid[i * COLS + j];
 
     cout << "Celulas vivas al inicio: " << alive_start << endl;
     cout << "Celulas vivas al final:  " << alive_end << endl;

@@ -15,6 +15,8 @@
 #include <fstream>
 #include <cstdlib>
 #include <cuda_runtime.h>
+#include <cstdint>
+#include <random>
 
 using namespace std;
 using namespace chrono;
@@ -32,8 +34,8 @@ using namespace chrono;
 } while(0)
 
 // ---- Kernel basico (sin shared memory) ----
-__global__ void golStepBasic(const int* __restrict__ current,
-                               int* __restrict__ next,
+__global__ void golStepBasic(const uint8_t* __restrict__ current,
+                               uint8_t* __restrict__ next,
                                int rows, int cols) {
     int j = blockIdx.x * blockDim.x + threadIdx.x;
     int i = blockIdx.y * blockDim.y + threadIdx.y;
@@ -59,11 +61,11 @@ __global__ void golStepBasic(const int* __restrict__ current,
 // ---- Kernel optimizado con shared memory ----
 // Cada bloque carga una tile de (BLOCK_DIM+2) x (BLOCK_DIM+2)
 // incluyendo el halo de 1 celda en cada borde.
-__global__ void golStepShared(const int* __restrict__ current,
-                               int* __restrict__ next,
+__global__ void golStepShared(const uint8_t* __restrict__ current,
+                               uint8_t* __restrict__ next,
                                int rows, int cols) {
     // Shared memory: tile con halo
-    __shared__ int tile[BLOCK_DIM + 2][BLOCK_DIM + 2];
+    __shared__ uint8_t tile[BLOCK_DIM + 2][BLOCK_DIM + 2];
 
     int tx = threadIdx.x; // local x dentro del bloque
     int ty = threadIdx.y; // local y dentro del bloque
@@ -137,24 +139,25 @@ int main(int argc, char* argv[]) {
     cout << "Grid: " << ROWS << "x" << COLS << " | Steps: " << STEPS
          << " | Kernel: " << (USE_SHARED ? "shared memory" : "basico") << endl;
 
-    // Inicializacion en CPU
-    srand(SEED);
+    // Inicializacion en CPU con mt19937 (determinista multiplataforma)
+    mt19937 rng(SEED);
+    uniform_int_distribution<int> dist(0, 99);
     int N = ROWS * COLS;
-    vector<int> h_grid(N), h_result(N);
+    vector<uint8_t> h_grid(N), h_result(N);
 
     for (int i = 0; i < N; i++)
-        h_grid[i] = (rand() % 100 < 30) ? 1 : 0;
+        h_grid[i] = (dist(rng) < 30) ? 1 : 0;
 
     long long alive_start = 0;
     for (int v : h_grid) alive_start += v;
 
     // Alocar memoria GPU
-    int *d_current, *d_next;
-    CUDA_CHECK(cudaMalloc(&d_current, N * sizeof(int)));
-    CUDA_CHECK(cudaMalloc(&d_next,    N * sizeof(int)));
+    uint8_t *d_current, *d_next;
+    CUDA_CHECK(cudaMalloc(&d_current, N * sizeof(uint8_t)));
+    CUDA_CHECK(cudaMalloc(&d_next,    N * sizeof(uint8_t)));
 
     // Copiar datos a GPU
-    CUDA_CHECK(cudaMemcpy(d_current, h_grid.data(), N * sizeof(int), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_current, h_grid.data(), N * sizeof(uint8_t), cudaMemcpyHostToDevice));
 
     // Configurar grid de kernels
     dim3 block(BLOCK_DIM, BLOCK_DIM);
@@ -183,7 +186,7 @@ int main(int argc, char* argv[]) {
     double elapsed = duration<double>(t_end - t_start).count();
 
     // Copiar resultado de vuelta
-    CUDA_CHECK(cudaMemcpy(h_result.data(), d_current, N * sizeof(int), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(h_result.data(), d_current, N * sizeof(uint8_t), cudaMemcpyDeviceToHost));
 
     long long alive_end = 0;
     for (int v : h_result) alive_end += v;
