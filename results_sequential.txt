@@ -1,2 +1,0 @@
-mode,rows,cols,steps,time_s,time_per_step_ms,alive_end
-sequential,4096,4096,500,33.3108,66.6216,909293

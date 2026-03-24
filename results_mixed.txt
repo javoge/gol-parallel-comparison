@@ -1,2 +1,0 @@
-mode,rows,cols,steps,procs,threads,time_s,time_per_step_ms,alive_end
-mixed,4096,4096,500,4,4,12.4019,24.8037,909293
