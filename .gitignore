@@ -1,0 +1,51 @@
+# =============================================================
+# .gitignore - Game of Life Parallel Comparison
+# =============================================================
+
+# --- Binarios compilados ---
+bin/
+*.exe
+*.out
+
+# --- Archivos objeto (intermedios de compilacion) ---
+*.obj
+*.o
+
+# --- Resultados de benchmark por corrida (se sobreescriben en cada ejecucion) ---
+results_sequential.txt
+results_openmp.txt
+results_mpi.txt
+results_mixed.txt
+results_cuda.txt
+results_perf_*.csv
+
+# Nota: results_unified.csv SI se versiona, acumula el historial de benchmark
+
+# --- Logs de monitoreo de recursos ---
+monitors/
+results_resources_*.csv
+
+# --- Archivos temporales de compilacion (MSVC) ---
+*.pdb
+*.ilk
+*.exp
+*.lib
+
+# --- Logs temporales del script de build ---
+gol_build_stdout.log
+gol_build_stderr.log
+gol_build_cmd.bat
+
+# --- Python ---
+__pycache__/
+*.pyc
+*.pyo
+
+# --- Graficos generados por plot_results.py ---
+grafico_*.png
+
+# --- Editores ---
+.vscode/
+.idea/
+*.suo
+*.user
