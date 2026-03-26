@@ -31,7 +31,8 @@ param(
     [string]$MonitorDir = "monitors",
     [switch]$MonitorPerCore,
     [switch]$BuildOnly,
-    [switch]$RunOnly
+    [switch]$RunOnly,
+    [string[]]$Variants = @("sequential", "openmp", "mpi", "mixed", "cuda_basic", "cuda_shared")
 )
 
 $ErrorActionPreference = "Stop"
@@ -562,121 +563,130 @@ if (-not $BuildOnly) {
                 $isWarmup = ($run -le $WarmupRuns)
                 $runLabel = if ($isWarmup) { "warmup $run/$WarmupRuns" } else { "muestra $($run - $WarmupRuns)/$Repeats" }
 
-            # 1. Secuencial
-            Write-Header "1/5 - Secuencial ($runLabel)"
-            if (Test-Path "$BIN\gol_sequential.exe") {
-                $resultFile = Join-Path $SCRIPT_ROOT "results_sequential.txt"
-                Reset-ResultFile -Path $resultFile
-                & "$BIN\gol_sequential.exe" $ROWS $COLS $STEPS $seedValue
-                if ($LASTEXITCODE -ne 0) {
-                    Write-ERR "Fallo secuencial (exit code $LASTEXITCODE)."
-                } elseif (Test-Path $resultFile) {
-                    $rec = Get-ResultRecord -FilePath $resultFile
-                    Add-UnifiedResult -Path $unifiedPath -Record $rec -SeedValue $seedValue -RunIndex $run -IsWarmup $isWarmup
-                } else {
-                    Write-ERR "No se genero results_sequential.txt."
-                }
-            } else {
-                Write-INFO "Binario secuencial no encontrado. Se omite."
-            }
-
-            # 2. OpenMP (varios conteos de hilos)
-            Write-Header "2/5 - OpenMP ($runLabel)"
-            foreach ($t in $threadRuns) {
-                if (Test-Path "$BIN\gol_openmp.exe") {
-                    Write-INFO "--- $t hilos ---"
-                    $resultFile = Join-Path $SCRIPT_ROOT "results_openmp.txt"
-                    Reset-ResultFile -Path $resultFile
-                    & "$BIN\gol_openmp.exe" $ROWS $COLS $STEPS $t $seedValue
-                    if ($LASTEXITCODE -ne 0) {
-                        Write-ERR "Fallo OpenMP para $t hilos (exit code $LASTEXITCODE)."
-                        continue
-                    }
-                    if (Test-Path $resultFile) {
-                        $rec = Get-ResultRecord -FilePath $resultFile
-                        Add-UnifiedResult -Path $unifiedPath -Record $rec -SeedValue $seedValue -RunIndex $run -IsWarmup $isWarmup -Threads $t
+                # 1. Secuencial
+                if ($Variants -contains "sequential") {
+                    Write-Header "1/5 - Secuencial ($runLabel)"
+                    if (Test-Path "$BIN\gol_sequential.exe") {
+                        $resultFile = Join-Path $SCRIPT_ROOT "results_sequential.txt"
+                        Reset-ResultFile -Path $resultFile
+                        & "$BIN\gol_sequential.exe" $ROWS $COLS $STEPS $seedValue
+                        if ($LASTEXITCODE -ne 0) {
+                            Write-ERR "Fallo secuencial (exit code $LASTEXITCODE)."
+                        } elseif (Test-Path $resultFile) {
+                            $rec = Get-ResultRecord -FilePath $resultFile
+                            Add-UnifiedResult -Path $unifiedPath -Record $rec -SeedValue $seedValue -RunIndex $run -IsWarmup $isWarmup
+                        } else {
+                            Write-ERR "No se genero results_sequential.txt."
+                        }
                     } else {
-                        Write-ERR "No se genero results_openmp.txt para $t hilos."
+                        Write-INFO "Binario secuencial no encontrado. Se omite."
                     }
                 }
-            }
-            if (-not (Test-Path "$BIN\gol_openmp.exe")) { Write-INFO "Binario OpenMP no encontrado. Se omite." }
 
-            # 3. MPI (varios conteos de procesos)
-            Write-Header "3/5 - MPI ($runLabel)"
-            foreach ($p in (Parse-IntList -Values $MPIProcs | Where-Object { $_ -ge 1 } | Select-Object -Unique)) {
-                if ($mpi.Exec -and (Test-Path "$BIN\gol_mpi.exe")) {
-                    Write-INFO "--- $p procesos ---"
-                    $resultFile = Join-Path $SCRIPT_ROOT "results_mpi.txt"
-                    Reset-ResultFile -Path $resultFile
-                    Invoke-MPIProgram -MPIExec $mpi.Exec -Processes $p -Executable "$BIN\gol_mpi.exe" -Arguments @($ROWS, $COLS, $STEPS, $seedValue)
-                    if ($LASTEXITCODE -ne 0) {
-                        Write-ERR "Fallo MPI para $p procesos (exit code $LASTEXITCODE)."
-                        continue
-                    }
-                    if (Test-Path $resultFile) {
-                        $rec = Get-ResultRecord -FilePath $resultFile
-                        Add-UnifiedResult -Path $unifiedPath -Record $rec -SeedValue $seedValue -RunIndex $run -IsWarmup $isWarmup -Procs $p
+                # 2. OpenMP
+                if ($Variants -contains "openmp") {
+                    Write-Header "2/5 - OpenMP ($runLabel)"
+                    if (Test-Path "$BIN\gol_openmp.exe") {
+                        foreach ($t in $threadRuns) {
+                            Write-INFO "--- $t hilos ---"
+                            $resultFile = Join-Path $SCRIPT_ROOT "results_openmp.txt"
+                            Reset-ResultFile -Path $resultFile
+                            & "$BIN\gol_openmp.exe" $ROWS $COLS $STEPS $t $seedValue
+                            if ($LASTEXITCODE -ne 0) {
+                                Write-ERR "Fallo OpenMP para $t hilos (exit code $LASTEXITCODE)."
+                                continue
+                            }
+                            if (Test-Path $resultFile) {
+                                $rec = Get-ResultRecord -FilePath $resultFile
+                                Add-UnifiedResult -Path $unifiedPath -Record $rec -SeedValue $seedValue -RunIndex $run -IsWarmup $isWarmup -Threads $t
+                            } else {
+                                Write-ERR "No se genero results_openmp.txt para $t hilos."
+                            }
+                        }
                     } else {
-                        Write-ERR "No se genero results_mpi.txt para $p procesos."
+                        Write-INFO "Binario OpenMP no encontrado. Se omite."
                     }
                 }
-            }
-            if (-not $mpi.Exec) { Write-INFO "MPI no disponible. Se omite ejecucion MPI." }
-            if (-not (Test-Path "$BIN\gol_mpi.exe")) { Write-INFO "Binario MPI no encontrado. Se omite." }
 
-            # 4. Mixto MPI+OpenMP
-            Write-Header "4/5 - Mixto (MPI+OpenMP) ($runLabel)"
-            if ($mpi.Exec -and (Test-Path "$BIN\gol_mixed.exe")) {
-                foreach ($p in (Parse-IntList -Values $MixedMPIProcs | Where-Object { $_ -ge 1 } | Select-Object -Unique)) {
-                    Write-INFO "--- $p procesos / $MixedThreads hilos ---"
-                    $resultFile = Join-Path $SCRIPT_ROOT "results_mixed.txt"
-                    Reset-ResultFile -Path $resultFile
-                    Invoke-MPIProgram -MPIExec $mpi.Exec -Processes $p -Executable "$BIN\gol_mixed.exe" -Arguments @($ROWS, $COLS, $STEPS, $MixedThreads, $seedValue)
-                    if ($LASTEXITCODE -ne 0) {
-                        Write-ERR "Fallo mixto para $p procesos y $MixedThreads hilos (exit code $LASTEXITCODE)."
-                        continue
-                    }
-                    if (Test-Path $resultFile) {
-                        $rec = Get-ResultRecord -FilePath $resultFile
-                        Add-UnifiedResult -Path $unifiedPath -Record $rec -SeedValue $seedValue -RunIndex $run -IsWarmup $isWarmup -Procs $p -Threads $MixedThreads
+                # 3. MPI
+                if ($Variants -contains "mpi") {
+                    Write-Header "3/5 - MPI ($runLabel)"
+                    if ($mpi.Ready -and (Test-Path "$BIN\gol_mpi.exe")) {
+                        foreach ($p in (Parse-IntList -Values $MPIProcs | Where-Object { $_ -ge 1 } | Select-Object -Unique)) {
+                            Write-ERR "Fallo MPI para $p procesos (exit code $LASTEXITCODE)."
+                            continue
+                        }
+                        if (Test-Path $resultFile) {
+                            $rec = Get-ResultRecord -FilePath $resultFile
+                            Add-UnifiedResult -Path $unifiedPath -Record $rec -SeedValue $seedValue -RunIndex $run -IsWarmup $isWarmup -Procs $p
+                        } else {
+                            Write-ERR "No se genero results_mpi.txt para $p procesos."
+                        }
                     } else {
-                        Write-ERR "No se genero results_mixed.txt para $p procesos."
+                        Write-INFO "MPI no disponible o binario no encontrado. Se omite."
                     }
                 }
-            }
-            if (-not $mpi.Exec) { Write-INFO "MPI no disponible. Se omite ejecucion mixta." }
-            if (-not (Test-Path "$BIN\gol_mixed.exe")) { Write-INFO "Binario mixto no encontrado. Se omite." }
+
+                # 4. Mixto
+                if ($Variants -contains "mixed") {
+                    Write-Header "4/5 - Mixto (MPI+OpenMP) ($runLabel)"
+                    if ($mpi.Ready -and (Test-Path "$BIN\gol_mixed.exe")) {
+                        foreach ($p in (Parse-IntList -Values $MixedMPIProcs | Where-Object { $_ -ge 1 } | Select-Object -Unique)) {
+                            Write-INFO "--- $p procesos / $MixedThreads hilos ---"
+                            $resultFile = Join-Path $SCRIPT_ROOT "results_mixed.txt"
+                            Reset-ResultFile -Path $resultFile
+                            Invoke-MPIProgram -MPIExec $mpi.Exec -Processes $p -Executable "$BIN\gol_mixed.exe" -Arguments @($ROWS, $COLS, $STEPS, $MixedThreads, $seedValue)
+                            if ($LASTEXITCODE -ne 0) {
+                                Write-ERR "Fallo mixto para $p procesos (exit code $LASTEXITCODE)."
+                                continue
+                            }
+                            if (Test-Path $resultFile) {
+                                $rec = Get-ResultRecord -FilePath $resultFile
+                                Add-UnifiedResult -Path $unifiedPath -Record $rec -SeedValue $seedValue -RunIndex $run -IsWarmup $isWarmup -Procs $p -Threads $MixedThreads
+                            } else {
+                                Write-ERR "No se genero results_mixed.txt."
+                            }
+                        }
+                    } else {
+                        Write-INFO "MPI no disponible o binario mixto no encontrado. Se omite."
+                    }
+                }
 
                 # 5. CUDA
-                Write-Header "5/5 - GPU CUDA ($runLabel)"
-                if (Test-Path "$BIN\gol_cuda.exe") {
-                    Write-INFO "--- Kernel basico ---"
-                    $resultFile = Join-Path $SCRIPT_ROOT "results_cuda.txt"
-                    Reset-ResultFile -Path $resultFile
-                    & "$BIN\gol_cuda.exe" $ROWS $COLS $STEPS $seedValue 0
-                    if ($LASTEXITCODE -ne 0) {
-                        Write-ERR "Fallo CUDA kernel basico (exit code $LASTEXITCODE)."
-                    } elseif (Test-Path $resultFile) {
-                        $rec = Get-ResultRecord -FilePath $resultFile
-                        Add-UnifiedResult -Path $unifiedPath -Record $rec -SeedValue $seedValue -RunIndex $run -IsWarmup $isWarmup -Kernel "basic" -Gpu $rec.gpu
+                if ($Variants -contains "cuda_basic" -or $Variants -contains "cuda_shared") {
+                    Write-Header "5/5 - GPU CUDA ($runLabel)"
+                    if (Test-Path "$BIN\gol_cuda.exe") {
+                        if ($Variants -contains "cuda_basic") {
+                            Write-INFO "--- Kernel basico ---"
+                            $resultFile = Join-Path $SCRIPT_ROOT "results_cuda.txt"
+                            Reset-ResultFile -Path $resultFile
+                            & "$BIN\gol_cuda.exe" $ROWS $COLS $STEPS $seedValue 0
+                            if ($LASTEXITCODE -ne 0) {
+                                Write-ERR "Fallo CUDA kernel basico (exit code $LASTEXITCODE)."
+                            } elseif (Test-Path $resultFile) {
+                                $rec = Get-ResultRecord -FilePath $resultFile
+                                Add-UnifiedResult -Path $unifiedPath -Record $rec -SeedValue $seedValue -RunIndex $run -IsWarmup $isWarmup -Kernel "basic" -Gpu $rec.gpu
+                            } else {
+                                Write-ERR "No se genero results_cuda.txt para kernel basico."
+                            }
+                        }
+                        if ($Variants -contains "cuda_shared") {
+                            Write-INFO "--- Kernel con shared memory ---"
+                            $resultFile = Join-Path $SCRIPT_ROOT "results_cuda.txt"
+                            Reset-ResultFile -Path $resultFile
+                            & "$BIN\gol_cuda.exe" $ROWS $COLS $STEPS $seedValue 1
+                            if ($LASTEXITCODE -ne 0) {
+                                Write-ERR "Fallo CUDA kernel shared (exit code $LASTEXITCODE)."
+                            } elseif (Test-Path $resultFile) {
+                                $rec = Get-ResultRecord -FilePath $resultFile
+                                Add-UnifiedResult -Path $unifiedPath -Record $rec -SeedValue $seedValue -RunIndex $run -IsWarmup $isWarmup -Kernel "shared" -Gpu $rec.gpu
+                            } else {
+                                Write-ERR "No se genero results_cuda.txt para kernel shared."
+                            }
+                        }
                     } else {
-                        Write-ERR "No se genero results_cuda.txt para kernel basico."
+                        Write-INFO "Binario CUDA no encontrado. Se omite."
                     }
-
-                    Write-INFO "--- Kernel con shared memory ---"
-                    Reset-ResultFile -Path $resultFile
-                    & "$BIN\gol_cuda.exe" $ROWS $COLS $STEPS $seedValue 1
-                    if ($LASTEXITCODE -ne 0) {
-                        Write-ERR "Fallo CUDA kernel shared (exit code $LASTEXITCODE)."
-                    } elseif (Test-Path $resultFile) {
-                        $rec = Get-ResultRecord -FilePath $resultFile
-                        Add-UnifiedResult -Path $unifiedPath -Record $rec -SeedValue $seedValue -RunIndex $run -IsWarmup $isWarmup -Kernel "shared" -Gpu $rec.gpu
-                    } else {
-                        Write-ERR "No se genero results_cuda.txt para kernel shared."
-                    }
-                } else {
-                    Write-INFO "Binario CUDA no encontrado. Se omite."
                 }
             }
         }

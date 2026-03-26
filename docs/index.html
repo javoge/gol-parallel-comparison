@@ -462,20 +462,20 @@ __syncthreads();
     <!-- STATS HERO -->
     <div class="stats">
       <div class="stat">
-        <div class="stat-num">~325×</div>
-        <div class="stat-label">Speedup CUDA Shared vs Secuencial (4096×4096)</div>
+        <div class="stat-num">317×</div>
+        <div class="stat-label">Speedup CUDA Básico vs Secuencial (32k × 32k)</div>
       </div>
       <div class="stat">
-        <div class="stat-num green">4.1×</div>
-        <div class="stat-label">Speedup OpenMP 16 hilos vs Secuencial</div>
+        <div class="stat-num green">4.2×</div>
+        <div class="stat-label">Speedup OpenMP 16 hilos vs Secuencial (32k × 32k)</div>
       </div>
       <div class="stat">
-        <div class="stat-num purple">4.2×</div>
-        <div class="stat-label">Speedup MPI 8 procesos vs Secuencial</div>
+        <div class="stat-num purple">2h 12m</div>
+        <div class="stat-label">Costo de overhead: Tpo. OpenMP 1 hilo (32k × 32k)</div>
       </div>
       <div class="stat">
-        <div class="stat-num yellow">16 M</div>
-        <div class="stat-label">Células procesadas por generación (4096×4096)</div>
+        <div class="stat-num yellow">1.07 B</div>
+        <div class="stat-label">Células procesadas por generación en Stress Extremo</div>
       </div>
     </div>
 
@@ -629,6 +629,54 @@ __syncthreads();
       </table>
     </div>
 
+    <!-- TABLA 32768 (STRESS) -->
+    <h3 style="margin-top:2.5rem; color: var(--accent4);">Stress Test Extremo: Grilla 32768 × 32768 (1.07 Billones de Células) — 1000 iteraciones</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Paradigma</th>
+            <th>Config</th>
+            <th>Tiempo total (s)</th>
+            <th>ms / generación</th>
+            <th>Speedup vs Seq.</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="highlight-row">
+            <td>Secuencial</td><td>1 hilo</td>
+            <td class="slowest">4408.73</td><td class="slowest">4408.73</td><td>1.0×</td>
+          </tr>
+          <tr>
+            <td>OpenMP</td><td>1 hilo (Overhead Test)</td><td>7966.95</td><td>7966.95</td>
+            <td><span class="speedup-badge" style="color:var(--accent4); background:rgba(247,129,102,.12)">0.55×</span></td>
+          </tr>
+          <tr>
+            <td>OpenMP</td><td>8 hilos</td><td>1175.12</td><td>1175.12</td>
+            <td><span class="speedup-badge">3.7×</span></td>
+          </tr>
+          <tr>
+            <td>OpenMP</td><td>16 hilos</td><td>1095.14</td><td>1095.14</td>
+            <td><span class="speedup-badge">4.0×</span></td>
+          </tr>
+          <tr>
+            <td>MPI</td><td>1 a 8 procesos</td><td>-</td><td>-</td>
+            <td><span class="speedup-badge" style="color:var(--text-muted); background:transparent;">FALLA (Límite RAM/Red)</span></td>
+          </tr>
+          <tr>
+            <td>CUDA Básico</td><td>RTX 4070</td>
+            <td class="fastest">13.88</td><td class="fastest">13.88</td>
+            <td><span class="speedup-badge" style="background:#39d35322; color:#39d353; font-weight:bold;">317×</span></td>
+          </tr>
+          <tr>
+            <td>CUDA Shared Memory</td><td>RTX 4070</td>
+            <td>22.39</td><td>22.39</td>
+            <td><span class="speedup-badge">196×</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
     <!-- GRAFICOS -->
     <h3 style="margin-top:2.5rem;">Gráficos Comparativos</h3>
     <div class="img-grid">
@@ -661,16 +709,30 @@ __syncthreads();
     <div class="conclusion-list">
 
       <div class="conclusion-item">
+        <div class="icon">💥</div>
+        <div>
+          <h4 style="color:var(--accent4)">El Límite Físico de 65K: Desbordamiento Entero de 32-bits en CUDA</h4>
+          <p>
+            Al intentar llevar la simulación a una grilla de <strong>65536 × 65536</strong> (4.29 billones de células), 
+            los kernels CUDA fallaron instantáneamente con un error de <em>illegal memory access</em>.
+            La causa fue un <strong>desbordamiento (overflow)</strong> del índice de memoria 1D: al multiplicar <code>65536 * 65536 = 4,294,967,296</code>, el valor excedió
+            el límite máximo de un entero de 32 bits (<code>4,294,967,295</code>). Esto causó que el cálculo del
+            índice <code>id = y * cols + x</code> volviera a cero o valores negativos, apuntando fuera de los límites
+            y siendo abortado por la GPU. Demostrando que a escalas extremas, cada decisión de tipos de datos cuenta.
+          </p>
+        </div>
+      </div>
+
+      <div class="conclusion-item">
         <div class="icon">🏆</div>
         <div>
-          <h4>CUDA Básico ganó a CUDA Shared Memory en grillas grandes</h4>
+          <h4>CUDA Básico ganó a CUDA Shared Memory en grillas gigantes</h4>
           <p>
-            Contrario a lo esperado, en la grilla de 4096×4096 el kernel básico (~0.22 ms/paso)
-            fue más rápido que el de shared memory (~0.34 ms/paso). Esto se debe a que el overhead de
-            concierto de hilos para cargar el <em>tile</em> compartido supera la penalización de latencia
-            de la memoria global cuando la grilla ya es tan grande que la GPU no puede esconder esa latencia
-            con paralelismo de bloques. La shared memory brilla más en grillas donde el tile representa
-            una fracción mayor de los datos activos.
+            Contrario a lo esperado, en la grilla bestial de 32768×32768 el kernel básico (~13.88 ms/paso)
+            arrasó con el de shared memory (~22.39 ms/paso). Esto ocurre porque a esta escala, la GPU tiene tantos bloques activos que
+            logra ocultar casi por completo la latencia de la memoria global intercambiando hilos al instante (<em>latency hiding</em>).
+            Por otro lado, el costo de inicializar el tile compartido <code>__shared__</code> y la sincronización con barreras <code>__syncthreads()</code>
+            se vuelve el verdadero cuello de botella.
           </p>
         </div>
       </div>
@@ -741,15 +803,15 @@ __syncthreads();
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>Puesto</th><th>Paradigma</th><th>ms / generación</th><th>Comentario</th></tr>
+          <tr><th>Puesto</th><th>Paradigma</th><th>Tiempo Relativo (32k)</th><th>Comentario</th></tr>
         </thead>
         <tbody>
-          <tr><td>🥇 1</td><td>CUDA Básico</td><td class="fastest">0.22</td><td>Paralelismo masivo GPU gana en escala</td></tr>
-          <tr><td>🥈 2</td><td>CUDA Shared Memory</td><td class="fastest">0.34</td><td>Mayor overhead de sync en tile grande</td></tr>
-          <tr><td>🥉 3</td><td>MPI 8 procesos</td><td>17.21</td><td>Menor overhead que OpenMP por proceso dedicado</td></tr>
-          <tr><td>4</td><td>OpenMP 16 hilos</td><td>17.56</td><td>Comparte caché → contención en grilla grande</td></tr>
-          <tr><td>5</td><td>MPI+OpenMP 4P×4H</td><td>23.26</td><td>Overhead de coordinación doble</td></tr>
-          <tr><td>6</td><td>Secuencial</td><td class="slowest">72.45</td><td>Baseline de referencia</td></tr>
+          <tr><td>🥇 1</td><td>CUDA Básico</td><td class="fastest">13.88 s</td><td>Paralelismo masivo GPU domina en la escala extrema</td></tr>
+          <tr><td>🥈 2</td><td>CUDA Shared Memory</td><td class="fastest">22.39 s</td><td>Mayor overhead de sync y copias en tiles pequeños</td></tr>
+          <tr><td>🥉 3</td><td>OpenMP 16 hilos</td><td>1095.14 s</td><td>Escalabilidad aceptable en CPU multinúcleo</td></tr>
+          <tr><td>4</td><td>MPI (Todas las config)</td><td>CRASH</td><td>Falla intentando pasar buffers > 1GB por capa de red</td></tr>
+          <tr><td>5</td><td>Secuencial</td><td class="slowest">4408.73 s</td><td>Baseline de referencia. 1h 13min por ronda.</td></tr>
+          <tr><td>6</td><td>OpenMP 1 hilo</td><td class="slowest">7966.95 s</td><td>Aplastado por el peso de administrar 1 billón de loops paralelos sin ayuda</td></tr>
         </tbody>
       </table>
     </div>
