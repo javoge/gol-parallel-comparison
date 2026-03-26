@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GoL Parallel Comparison — Trabajo Final</title>
+  <meta name="description" content="Informe comparativo de implementaciones paralelas del Juego de la Vida de Conway: Secuencial, OpenMP, MPI, MPI+OpenMP y CUDA. Trabajo Final — Computación Paralela en GPU." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg:        #0d1117;
+      --surface:   #161b22;
+      --surface2:  #21262d;
+      --border:    #30363d;
+      --text:      #e6edf3;
+      --text-muted:#8b949e;
+      --accent:    #58a6ff;
+      --accent2:   #3fb950;
+      --accent3:   #d29922;
+      --accent4:   #f78166;
+      --accent5:   #bc8cff;
+      --accent6:   #39d353;
+      --radius:    12px;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+      font-size: 16px;
+    }
+
+    /* ---------- NAV ---------- */
+    nav {
+      position: sticky; top: 0; z-index: 100;
+      background: rgba(13,17,23,0.85);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      padding: 0 1.5rem;
+      display: flex; align-items: center; justify-content: space-between;
+      height: 56px;
+    }
+    .nav-brand { font-weight: 700; font-size: 1rem; color: var(--accent); letter-spacing: -.3px; }
+    .nav-links { display: flex; gap: 1.5rem; list-style: none; }
+    .nav-links a { color: var(--text-muted); text-decoration: none; font-size: .875rem; transition: color .2s; }
+    .nav-links a:hover { color: var(--text); }
+
+    /* ---------- HERO ---------- */
+    .hero {
+      text-align: center;
+      padding: 5rem 1.5rem 4rem;
+      background: radial-gradient(ellipse at 50% 0%, rgba(88,166,255,.12) 0%, transparent 70%);
+      border-bottom: 1px solid var(--border);
+    }
+    .hero-badge {
+      display: inline-block;
+      background: rgba(88,166,255,.12);
+      color: var(--accent);
+      border: 1px solid rgba(88,166,255,.3);
+      border-radius: 20px;
+      padding: .25rem .85rem;
+      font-size: .8rem;
+      font-weight: 600;
+      letter-spacing: .04em;
+      margin-bottom: 1.5rem;
+      text-transform: uppercase;
+    }
+    .hero h1 {
+      font-size: clamp(2rem, 5vw, 3.5rem);
+      font-weight: 700;
+      line-height: 1.15;
+      letter-spacing: -.5px;
+      margin-bottom: 1.25rem;
+    }
+    .hero h1 span { color: var(--accent); }
+    .hero p {
+      font-size: 1.1rem;
+      color: var(--text-muted);
+      max-width: 640px;
+      margin: 0 auto 2rem;
+    }
+    .hero-meta {
+      display: flex; justify-content: center; flex-wrap: wrap; gap: 1.5rem;
+      font-size: .875rem; color: var(--text-muted);
+    }
+    .hero-meta span::before { content: '📌 '; }
+
+    /* ---------- LAYOUT ---------- */
+    .container { max-width: 1100px; margin: 0 auto; padding: 0 1.5rem; }
+    section { padding: 5rem 0; border-bottom: 1px solid var(--border); }
+    section:last-child { border-bottom: none; }
+    .section-label {
+      font-size: .75rem; font-weight: 600; letter-spacing: .1em;
+      text-transform: uppercase; color: var(--accent); margin-bottom: .75rem;
+    }
+    h2 {
+      font-size: clamp(1.5rem, 3vw, 2.25rem);
+      font-weight: 700;
+      letter-spacing: -.3px;
+      margin-bottom: 1.5rem;
+    }
+    h3 { font-size: 1.2rem; font-weight: 600; margin-bottom: .75rem; }
+    p { color: var(--text-muted); margin-bottom: 1rem; }
+    p:last-child { margin-bottom: 0; }
+    strong { color: var(--text); }
+
+    /* ---------- CARDS GRID ---------- */
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem; margin-top: 2rem; }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.5rem;
+      transition: border-color .2s, transform .2s;
+    }
+    .card:hover { border-color: var(--accent); transform: translateY(-2px); }
+    .card-icon { font-size: 2rem; margin-bottom: 1rem; }
+    .card-badge {
+      display: inline-block;
+      font-size: .7rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+      padding: .2rem .6rem; border-radius: 6px; margin-bottom: .75rem;
+    }
+    .badge-seq   { background: rgba(139,148,158,.15); color: var(--text-muted); }
+    .badge-omp   { background: rgba(88,166,255,.12); color: var(--accent); }
+    .badge-mpi   { background: rgba(63,185,80,.12);  color: var(--accent2); }
+    .badge-mixed { background: rgba(210,153,34,.12); color: var(--accent3); }
+    .badge-cuda  { background: rgba(188,140,255,.12);color: var(--accent5); }
+
+    /* ---------- CODE ---------- */
+    code {
+      font-family: 'JetBrains Mono', monospace;
+      background: var(--surface2);
+      padding: .15em .4em;
+      border-radius: 4px;
+      font-size: .85em;
+      color: var(--accent3);
+    }
+    pre {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.25rem;
+      overflow-x: auto;
+      margin: 1.25rem 0;
+    }
+    pre code { background: none; padding: 0; font-size: .88rem; color: var(--text); }
+
+    /* ---------- TABLE ---------- */
+    .table-wrap { overflow-x: auto; margin-top: 1.5rem; border-radius: var(--radius); border: 1px solid var(--border); }
+    table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+    thead { background: var(--surface2); }
+    thead th { padding: .85rem 1rem; text-align: left; font-size: .75rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+    tbody tr { border-top: 1px solid var(--border); transition: background .15s; }
+    tbody tr:hover { background: var(--surface2); }
+    tbody td { padding: .85rem 1rem; }
+    .highlight-row { background: rgba(88,166,255,.06) !important; }
+    .highlight-row td:first-child { font-weight: 600; color: var(--accent); }
+    .fastest { color: var(--accent2); font-weight: 700; }
+    .slowest  { color: var(--accent4); }
+    .speedup-badge {
+      display: inline-block;
+      font-size: .78rem; font-weight: 600;
+      background: rgba(63,185,80,.12); color: var(--accent2);
+      padding: .1rem .5rem; border-radius: 6px;
+    }
+
+    /* ---------- IMGS ---------- */
+    .img-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(440px, 1fr)); gap: 1.5rem; margin-top: 2rem; }
+    .img-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .img-card img { width: 100%; display: block; }
+    .img-caption { padding: .75rem 1rem; font-size: .82rem; color: var(--text-muted); }
+    .img-caption strong { color: var(--text); }
+
+    /* ---------- SPEC BOX ---------- */
+    .spec-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; margin-top: 1.5rem; }
+    .spec-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.25rem;
+    }
+    .spec-card h4 { font-size: .75rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); margin-bottom: .75rem; }
+    .spec-item { display: flex; justify-content: space-between; align-items: baseline; padding: .3rem 0; border-bottom: 1px solid var(--border); font-size: .875rem; }
+    .spec-item:last-child { border-bottom: none; }
+    .spec-item .k { color: var(--text-muted); }
+    .spec-item .v { color: var(--text); font-weight: 500; font-family: 'JetBrains Mono', monospace; font-size: .83rem; }
+
+    /* ---------- STAT HERO NUMBERS ---------- */
+    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin: 2rem 0; }
+    .stat {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.5rem;
+      text-align: center;
+    }
+    .stat-num { font-size: 2.4rem; font-weight: 700; letter-spacing: -1px; color: var(--accent); }
+    .stat-num.green { color: var(--accent2); }
+    .stat-num.purple { color: var(--accent5); }
+    .stat-num.yellow { color: var(--accent3); }
+    .stat-label { font-size: .8rem; color: var(--text-muted); margin-top: .25rem; }
+
+    /* ---------- CONCLUSION BLOCKS ---------- */
+    .conclusion-list { display: grid; gap: .75rem; margin-top: 1.5rem; }
+    .conclusion-item {
+      display: flex; align-items: flex-start; gap: 1rem;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 1.25rem;
+    }
+    .conclusion-item .icon { font-size: 1.4rem; flex-shrink: 0; margin-top: .1rem; }
+    .conclusion-item h4 { font-size: .95rem; font-weight: 600; color: var(--text); margin-bottom: .25rem; }
+    .conclusion-item p { font-size: .875rem; margin: 0; }
+
+    /* ---------- FOOTER ---------- */
+    footer {
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      padding: 2.5rem 1.5rem;
+      text-align: center;
+      font-size: .875rem;
+      color: var(--text-muted);
+    }
+    footer a { color: var(--accent); text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
+
+    /* ---------- MISC ---------- */
+    .divider { height: 1px; background: var(--border); margin: 2rem 0; }
+    .tag { display: inline-block; font-size: .75rem; font-weight: 500; padding: .2rem .6rem; border-radius: 6px; margin: .15rem; }
+    .tag-tech { background: var(--surface2); color: var(--text-muted); border: 1px solid var(--border); }
+
+    @media(max-width: 640px) {
+      .nav-links { display: none; }
+      .img-grid  { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ======================== NAV ======================== -->
+<nav>
+  <span class="nav-brand">🧬 GoL Parallel</span>
+  <ul class="nav-links">
+    <li><a href="#intro">Introducción</a></li>
+    <li><a href="#paradigmas">Paradigmas</a></li>
+    <li><a href="#metodologia">Metodología</a></li>
+    <li><a href="#resultados">Resultados</a></li>
+    <li><a href="#conclusiones">Conclusiones</a></li>
+  </ul>
+</nav>
+
+<!-- ======================== HERO ======================== -->
+<header class="hero">
+  <div class="hero-badge">Trabajo Final</div>
+  <h1>Juego de la Vida de Conway<br><span>Comparativa de Paradigmas Paralelos</span></h1>
+  <p>
+    Análisis comparativo de rendimiento y escalabilidad entre implementaciones
+    Secuencial, OpenMP, MPI, MPI+OpenMP y CUDA sobre una GPU NVIDIA RTX 4070.
+  </p>
+  <div class="hero-meta">
+    <span>Computación Paralela en GPU</span>
+    <span>Grillas hasta 4096 × 4096 células</span>
+    <span>NVIDIA GeForce RTX 4070</span>
+  </div>
+</header>
+
+<!-- ======================== SECCIÓN: INTRO ======================== -->
+<section id="intro">
+  <div class="container">
+    <p class="section-label">Contexto</p>
+    <h2>¿Por qué el Juego de la Vida?</h2>
+    <p>
+      El <strong>Juego de la Vida de Conway</strong> (GoL) es un autómata celular definido sobre una grilla
+      bidimensional toroidal donde cada célula puede estar <em>viva</em> o <em>muerta</em>.
+      En cada generación, el estado de cada célula se actualiza en base a sus 8 vecinos
+      (vecindad de Moore) con reglas simples:
+    </p>
+    <pre><code>// Reglas de Conway
+si la célula está VIVA:
+    sobrevive si tiene 2 o 3 vecinos vivos
+    muere en cualquier otro caso
+
+si la célula está MUERTA:
+    nace si tiene exactamente 3 vecinos vivos</code></pre>
+    <p>
+      Este modelo es <strong>ideal como benchmark de HPC</strong> porque:
+    </p>
+    <div class="cards" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
+      <div class="card">
+        <div class="card-icon">📐</div>
+        <h3>Carga uniforme</h3>
+        <p>Cada célula realiza el mismo cálculo. No hay desbalance de trabajo entre hilos.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon">💾</div>
+        <h3>Patrón determinístico</h3>
+        <p>Con la misma semilla <code>mt19937</code>, todas las versiones producen exactamente los mismos resultados.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon">⚡</div>
+        <h3>Escalabilidad clara</h3>
+        <p>La computación crece cuadráticamente con el tamaño de la grilla, facilitando análisis de speedup.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon">🔁</div>
+        <h3>Sincronización por pasos</h3>
+        <p>Cada generación requiere que todos los hilos/procesos terminen antes de avanzar: patrón clásico de HPC.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================== SECCIÓN: PARADIGMAS ======================== -->
+<section id="paradigmas">
+  <div class="container">
+    <p class="section-label">Implementaciones</p>
+    <h2>Los 5 Paradigmas</h2>
+    <p>Todas las versiones usan <strong>vectores 1D planos de <code>uint8_t</code></strong> para representar la grilla, garantizando memoria contigua y máximo aprovechamiento de caché. El acceso a la célula <code>(i, j)</code> se hace como <code>grid[i * COLS + j]</code>.</p>
+
+    <div class="cards">
+
+      <!-- SECUENCIAL -->
+      <div class="card">
+        <span class="card-badge badge-seq">1 — Secuencial</span>
+        <h3>gol_sequential.cpp</h3>
+        <p>Ejecuta todo en <strong>un único hilo de CPU</strong>. Sirve como <em>línea base</em> (baseline) para calcular el speedup de las demás versiones. No utiliza ninguna librería de paralelismo.</p>
+        <p>Es la referencia contra la que se mide si vale la pena paralelizar.</p>
+        <div class="divider"></div>
+        <span class="tag tag-tech">C++17</span>
+        <span class="tag tag-tech">MSVC / g++</span>
+      </div>
+
+      <!-- OPENMP -->
+      <div class="card">
+        <span class="card-badge badge-omp">2 — OpenMP</span>
+        <h3>gol_openmp.cpp</h3>
+        <p>Paraleliza el bucle de filas con la directiva <code>#pragma omp parallel for</code>. Cada hilo trabaja sobre un <strong>subconjunto de filas</strong> de la grilla de forma independiente.</p>
+        <p>Usa <strong>memoria compartida</strong> entre todos los hilos: no requiere comunicación, solo sincronización al finalizar cada generación.</p>
+        <pre><code>#pragma omp parallel for \
+  schedule(static) num_threads(T)
+for (int i = 0; i &lt; rows; i++) { ... }</code></pre>
+        <span class="tag tag-tech">OpenMP 2.0+</span>
+        <span class="tag tag-tech">Shared Memory</span>
+      </div>
+
+      <!-- MPI -->
+      <div class="card">
+        <span class="card-badge badge-mpi">3 — MPI</span>
+        <h3>gol_mpi.cpp</h3>
+        <p>Divide la grilla horizontalmente entre <strong>P procesos independientes</strong> con memoria distribuida. Antes de cada generación, cada proceso intercambia con sus vecinos las <em>ghost rows</em> (filas fantasma) necesarias para calcular los bordes.</p>
+        <pre><code>MPI_Sendrecv(/* fila superior → vecino arriba */);
+MPI_Sendrecv(/* fila inferior → vecino abajo */);</code></pre>
+        <span class="tag tag-tech">MS-MPI / OpenMPI</span>
+        <span class="tag tag-tech">Distributed Memory</span>
+        <span class="tag tag-tech">MPI_UINT8_T</span>
+      </div>
+
+      <!-- MIXTO -->
+      <div class="card">
+        <span class="card-badge badge-mixed">4 — MPI + OpenMP</span>
+        <h3>gol_mixed.cpp</h3>
+        <p>Modelo <strong>híbrido</strong> típico de clústeres HPC reales. Combina los dos modelos anteriores: MPI distribuye la carga entre nodos y <strong>dentro de cada proceso</strong> OpenMP paraleliza las filas locales con múltiples hilos.</p>
+        <p>Permite escalar tanto en número de nodos como en núcleos por nodo simultáneamente.</p>
+        <span class="tag tag-tech">MS-MPI</span>
+        <span class="tag tag-tech">OpenMP</span>
+        <span class="tag tag-tech">Hybrid HPC</span>
+      </div>
+
+      <!-- CUDA -->
+      <div class="card" style="grid-column: 1 / -1;">
+        <span class="card-badge badge-cuda">5 — CUDA</span>
+        <h3>gol_cuda.cu — Dos kernels: básico y shared memory</h3>
+        <p>Lleva toda la simulación a la <strong>GPU</strong>. La grilla completa se copia a VRAM una sola vez y el kernel lanza miles de hilos en paralelo masivo: un hilo por célula.</p>
+        <div class="cards" style="margin-top: 1rem; grid-template-columns: 1fr 1fr;">
+          <div>
+            <h4 style="color:var(--text-muted); font-size:.75rem; text-transform:uppercase; letter-spacing:.06em; margin-bottom:.5rem;">Kernel Básico</h4>
+            <p>Cada hilo lee directamente desde memoria global de la GPU (GDDR6X). Acceso simple pero con latencia de memoria global en cada vecino.</p>
+          </div>
+          <div>
+            <h4 style="color:var(--accent5); font-size:.75rem; text-transform:uppercase; letter-spacing:.06em; margin-bottom:.5rem;">Kernel Shared Memory ✦</h4>
+            <p>Cada bloque de hilos copia su región de la grilla (más el borde de 1 célula) a la <strong>shared memory</strong> del SM, que es ~100× más rápida que la global. Reduce drásticamente la latencia de acceso a vecinos.</p>
+            <pre style="margin:.5rem 0;"><code>__shared__ uint8_t tile[TILE+2][TILE+2];
+// cargar tile + halo
+__syncthreads();
+// calcular desde shared</code></pre>
+          </div>
+        </div>
+        <span class="tag tag-tech">CUDA Toolkit</span>
+        <span class="tag tag-tech">nvcc</span>
+        <span class="tag tag-tech">Bloques 16×16</span>
+        <span class="tag tag-tech">NVIDIA RTX 4070</span>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ======================== SECCIÓN: METODOLOGÍA ======================== -->
+<section id="metodologia">
+  <div class="container">
+    <p class="section-label">Configuración del Experimento</p>
+    <h2>Metodología</h2>
+    <p>Para garantizar mediciones rigurosas y comparables, se utilizó la siguiente configuración de hardware y parámetros de benchmark.</p>
+
+    <div class="spec-grid">
+      <div class="spec-card">
+        <h4>🖥️ CPU</h4>
+        <div class="spec-item"><span class="k">Hilos lógicos</span><span class="v">16</span></div>
+        <div class="spec-item"><span class="k">OS</span><span class="v">Windows 11</span></div>
+        <div class="spec-item"><span class="k">Compilador</span><span class="v">MSVC 2026 / cl.exe</span></div>
+        <div class="spec-item"><span class="k">MPI</span><span class="v">Microsoft MPI</span></div>
+        <div class="spec-item"><span class="k">Flags</span><span class="v">/O2 /std:c++17</span></div>
+      </div>
+      <div class="spec-card">
+        <h4>🎮 GPU</h4>
+        <div class="spec-item"><span class="k">Modelo</span><span class="v">RTX 4070</span></div>
+        <div class="spec-item"><span class="k">VRAM</span><span class="v">12 GB GDDR6X</span></div>
+        <div class="spec-item"><span class="k">Bloques</span><span class="v">16 × 16 threads</span></div>
+        <div class="spec-item"><span class="k">CUDA Toolkit</span><span class="v">nvcc / -O2</span></div>
+        <div class="spec-item"><span class="k">Arch</span><span class="v">Ada Lovelace</span></div>
+      </div>
+      <div class="spec-card">
+        <h4>📊 Benchmark</h4>
+        <div class="spec-item"><span class="k">Grilla 1</span><span class="v">2048 × 2048</span></div>
+        <div class="spec-item"><span class="k">Grilla 2</span><span class="v">4096 × 4096</span></div>
+        <div class="spec-item"><span class="k">Pasos</span><span class="v">200 generaciones</span></div>
+        <div class="spec-item"><span class="k">Warmup</span><span class="v">1 corrida</span></div>
+        <div class="spec-item"><span class="k">Muestras</span><span class="v">2 corridas limpias</span></div>
+      </div>
+      <div class="spec-card">
+        <h4>🔧 Decisiones de Diseño</h4>
+        <div class="spec-item"><span class="k">Tipo de dato</span><span class="v">uint8_t (1 byte)</span></div>
+        <div class="spec-item"><span class="k">Estructura</span><span class="v">vector 1D plano</span></div>
+        <div class="spec-item"><span class="k">RNG</span><span class="v">std::mt19937</span></div>
+        <div class="spec-item"><span class="k">Semilla</span><span class="v">42 (fija)</span></div>
+        <div class="spec-item"><span class="k">Densidad inicial</span><span class="v">30 % vivas</span></div>
+      </div>
+    </div>
+
+    <p style="margin-top:1.5rem;">
+      Antes de cada sesión de benchmark se cerraron todos los procesos de usuario (navegadores,
+      clientes de mensajería, etc.) para minimizar el ruido y garantizar CPUs y VRAM libres.
+      El monitoreo de recursos (CPU por núcleo, VRAM, temperatura y Watts de la GPU) se capturó
+      con <code>nvidia-smi</code> y contadores de rendimiento de Windows a intervalos de 250 ms.
+    </p>
+  </div>
+</section>
+
+<!-- ======================== SECCIÓN: RESULTADOS ======================== -->
+<section id="resultados">
+  <div class="container">
+    <p class="section-label">Datos Medidos</p>
+    <h2>Resultados</h2>
+
+    <!-- STATS HERO -->
+    <div class="stats">
+      <div class="stat">
+        <div class="stat-num">~325×</div>
+        <div class="stat-label">Speedup CUDA Shared vs Secuencial (4096×4096)</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num green">4.1×</div>
+        <div class="stat-label">Speedup OpenMP 16 hilos vs Secuencial</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num purple">4.2×</div>
+        <div class="stat-label">Speedup MPI 8 procesos vs Secuencial</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num yellow">16 M</div>
+        <div class="stat-label">Células procesadas por generación (4096×4096)</div>
+      </div>
+    </div>
+
+    <!-- TABLA 2048 -->
+    <h3 style="margin-top:2.5rem;">Grilla 2048 × 2048 — 200 generaciones (promedio de 2 muestras)</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Paradigma</th>
+            <th>Config</th>
+            <th>Tiempo total (s)</th>
+            <th>ms / generación</th>
+            <th>Speedup vs Seq.</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="highlight-row">
+            <td>Secuencial</td><td>1 hilo</td>
+            <td class="slowest">3.62</td><td class="slowest">18.09</td><td>1.0×</td>
+          </tr>
+          <tr>
+            <td>OpenMP</td><td>1 hilo</td><td>6.24</td><td>31.22</td>
+            <td><span class="speedup-badge">0.6×</span></td>
+          </tr>
+          <tr>
+            <td>OpenMP</td><td>2 hilos</td><td>3.16</td><td>15.80</td>
+            <td><span class="speedup-badge">1.1×</span></td>
+          </tr>
+          <tr>
+            <td>OpenMP</td><td>4 hilos</td><td>1.67</td><td>8.35</td>
+            <td><span class="speedup-badge">2.2×</span></td>
+          </tr>
+          <tr>
+            <td>OpenMP</td><td>8 hilos</td><td>0.98</td><td>4.90</td>
+            <td><span class="speedup-badge">3.7×</span></td>
+          </tr>
+          <tr>
+            <td>OpenMP</td><td>16 hilos</td><td>0.87</td><td>4.33</td>
+            <td><span class="speedup-badge">4.2×</span></td>
+          </tr>
+          <tr>
+            <td>MPI</td><td>1 proceso</td><td>4.75</td><td>23.75</td>
+            <td><span class="speedup-badge">0.8×</span></td>
+          </tr>
+          <tr>
+            <td>MPI</td><td>2 procesos</td><td>2.41</td><td>12.07</td>
+            <td><span class="speedup-badge">1.5×</span></td>
+          </tr>
+          <tr>
+            <td>MPI</td><td>4 procesos</td><td>1.25</td><td>6.24</td>
+            <td><span class="speedup-badge">2.9×</span></td>
+          </tr>
+          <tr>
+            <td>MPI</td><td>8 procesos</td><td>0.77</td><td>3.86</td>
+            <td><span class="speedup-badge">4.7×</span></td>
+          </tr>
+          <tr>
+            <td>MPI + OpenMP</td><td>2P × 4H (8 workers)</td><td>1.51</td><td>7.57</td>
+            <td><span class="speedup-badge">2.4×</span></td>
+          </tr>
+          <tr>
+            <td>MPI + OpenMP</td><td>4P × 4H (16 workers)</td><td>1.18</td><td>5.89</td>
+            <td><span class="speedup-badge">3.1×</span></td>
+          </tr>
+          <tr>
+            <td>CUDA Básico</td><td>RTX 4070</td><td>0.0143</td><td>0.072</td>
+            <td><span class="speedup-badge">252×</span></td>
+          </tr>
+          <tr>
+            <td>CUDA Shared Memory</td><td>RTX 4070</td>
+            <td class="fastest">0.0178</td><td class="fastest">0.088</td>
+            <td><span class="speedup-badge">205×</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- TABLA 4096 -->
+    <h3 style="margin-top:2.5rem;">Grilla 4096 × 4096 — 200 generaciones (promedio de 2 muestras limpias)</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Paradigma</th>
+            <th>Config</th>
+            <th>Tiempo total (s)</th>
+            <th>ms / generación</th>
+            <th>Speedup vs Seq.</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="highlight-row">
+            <td>Secuencial</td><td>1 hilo</td>
+            <td class="slowest">14.49</td><td class="slowest">72.45</td><td>1.0×</td>
+          </tr>
+          <tr>
+            <td>OpenMP</td><td>1 hilo</td><td>25.16</td><td>125.8</td>
+            <td><span class="speedup-badge">0.6×</span></td>
+          </tr>
+          <tr>
+            <td>OpenMP</td><td>2 hilos</td><td>12.75</td><td>63.75</td>
+            <td><span class="speedup-badge">1.1×</span></td>
+          </tr>
+          <tr>
+            <td>OpenMP</td><td>4 hilos</td><td>6.70</td><td>33.50</td>
+            <td><span class="speedup-badge">2.2×</span></td>
+          </tr>
+          <tr>
+            <td>OpenMP</td><td>8 hilos</td><td>4.52</td><td>22.61</td>
+            <td><span class="speedup-badge">3.2×</span></td>
+          </tr>
+          <tr>
+            <td>OpenMP</td><td>16 hilos</td><td>3.51</td><td>17.56</td>
+            <td><span class="speedup-badge">4.1×</span></td>
+          </tr>
+          <tr>
+            <td>MPI</td><td>1 proceso</td><td>18.99</td><td>94.95</td>
+            <td><span class="speedup-badge">0.8×</span></td>
+          </tr>
+          <tr>
+            <td>MPI</td><td>2 procesos</td><td>9.64</td><td>48.20</td>
+            <td><span class="speedup-badge">1.5×</span></td>
+          </tr>
+          <tr>
+            <td>MPI</td><td>4 procesos</td><td>6.26</td><td>31.30</td>
+            <td><span class="speedup-badge">2.3×</span></td>
+          </tr>
+          <tr>
+            <td>MPI</td><td>8 procesos</td><td>3.44</td><td>17.21</td>
+            <td><span class="speedup-badge">4.2×</span></td>
+          </tr>
+          <tr>
+            <td>MPI + OpenMP</td><td>2P × 4H (8 workers)</td><td>5.60</td><td>27.99</td>
+            <td><span class="speedup-badge">2.6×</span></td>
+          </tr>
+          <tr>
+            <td>MPI + OpenMP</td><td>4P × 4H (16 workers)</td><td>4.65</td><td>23.26</td>
+            <td><span class="speedup-badge">3.1×</span></td>
+          </tr>
+          <tr>
+            <td>CUDA Básico</td><td>RTX 4070</td><td>0.0444</td><td>0.222</td>
+            <td><span class="speedup-badge">326×</span></td>
+          </tr>
+          <tr>
+            <td>CUDA Shared Memory</td><td>RTX 4070</td>
+            <td class="fastest">0.0678</td><td class="fastest">0.339</td>
+            <td><span class="speedup-badge">214×</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- GRAFICOS -->
+    <h3 style="margin-top:2.5rem;">Gráficos Comparativos</h3>
+    <div class="img-grid">
+      <div class="img-card">
+        <img src="assets/grafico_comparativa.png" alt="Comparativa de tiempos de ejecución entre paradigmas" />
+        <p class="img-caption"><strong>Fig. 1</strong> — Tiempo total de ejecución por paradigma (mejor configuración de cada uno). CUDA domina con un margen arrasador.</p>
+      </div>
+      <div class="img-card">
+        <img src="assets/grafico_speedup_openmp.png" alt="Curva de speedup de OpenMP según cantidad de hilos" />
+        <p class="img-caption"><strong>Fig. 2</strong> — Curva de speedup de OpenMP. Nótese el aplanamiento característico predicho por la <strong>Ley de Amdahl</strong> al superar los 8 hilos.</p>
+      </div>
+      <div class="img-card">
+        <img src="assets/grafico_monitores_carga.png" alt="Carga de CPU y GPU durante los benchmarks" />
+        <p class="img-caption"><strong>Fig. 3</strong> — Uso de CPU (azul) y GPU (verde) a lo largo de la ejecución final monitorizada. Se observan los picos de CPU durante las pruebas paralelas y el impulso de GPU al entrar CUDA.</p>
+      </div>
+      <div class="img-card">
+        <img src="assets/grafico_monitores_fisicos.png" alt="Consumo en Watts y uso de VRAM de la GPU" />
+        <p class="img-caption"><strong>Fig. 4</strong> — Telemetría física de la RTX 4070: consumo eléctrico (rojo) y VRAM utilizada (violeta). El benchmark CUDA eleva el consumo pero la temperatura se mantiene controlada.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================== SECCIÓN: CONCLUSIONES ======================== -->
+<section id="conclusiones">
+  <div class="container">
+    <p class="section-label">Análisis</p>
+    <h2>Conclusiones</h2>
+
+    <div class="conclusion-list">
+
+      <div class="conclusion-item">
+        <div class="icon">🏆</div>
+        <div>
+          <h4>CUDA Básico ganó a CUDA Shared Memory en grillas grandes</h4>
+          <p>
+            Contrario a lo esperado, en la grilla de 4096×4096 el kernel básico (~0.22 ms/paso)
+            fue más rápido que el de shared memory (~0.34 ms/paso). Esto se debe a que el overhead de
+            concierto de hilos para cargar el <em>tile</em> compartido supera la penalización de latencia
+            de la memoria global cuando la grilla ya es tan grande que la GPU no puede esconder esa latencia
+            con paralelismo de bloques. La shared memory brilla más en grillas donde el tile representa
+            una fracción mayor de los datos activos.
+          </p>
+        </div>
+      </div>
+
+      <div class="conclusion-item">
+        <div class="icon">⚖️</div>
+        <div>
+          <h4>OpenMP con 1 hilo es más LENTO que el Secuencial</h4>
+          <p>
+            El overhead del <em>runtime</em> de OpenMP (inicialización de la región paralela,
+            sincronización de barrera al final de cada generación) supera al beneficio cuando
+            se usa un solo hilo. A 2 hilos ya empieza a rendir igual al Secuencial,
+            y a partir de 4 se nota el beneficio neto. Este resultado ilustra un principio
+            básico de HPC: <strong>el paralelismo tiene un costo fijo</strong> que debe amortizarse
+            con suficiente trabajo por hilo.
+          </p>
+        </div>
+      </div>
+
+      <div class="conclusion-item">
+        <div class="icon">🔗</div>
+        <div>
+          <h4>MPI + OpenMP (Mixto) no supera a MPI puro con 8 procesos</h4>
+          <p>
+            Con 4P×4H (16 workers), el Mixto tardó ~23 ms/paso en la grilla grande,
+            mientras que MPI con 8 procesos llegó a ~17 ms/paso. La razón es la
+            <strong>contención de núcleos</strong>: si el sistema tiene 16 núcleos y se lanzan
+            4 procesos MPI con 4 hilos OpenMP cada uno, los 16 hilos compiten por
+            los mismos recursos de CPU (especialmente el ancho de banda de memoria L3/RAM),
+            cosa que MPI puro distribuye mejor al asignar procesos dedicados.
+          </p>
+        </div>
+      </div>
+
+      <div class="conclusion-item">
+        <div class="icon">📉</div>
+        <div>
+          <h4>Ley de Amdahl se observa claramente en OpenMP</h4>
+          <p>
+            El speedup de OpenMP sigue la curva prevista por la Ley de Amdahl:
+            de 1 a 4 hilos la ganancia es casi lineal (duplicar hilos ≈ duplicar velocidad),
+            pero de 8 a 16 el speedup adicional es marginal (3.2× → 4.1×).
+            Esto indica que la fracción serial de la ejecución (coordinación, escritura del resultado,
+            setup de iteraciones) representa aproximadamente el 20% del tiempo total.
+          </p>
+        </div>
+      </div>
+
+      <div class="conclusion-item">
+        <div class="icon">🚀</div>
+        <div>
+          <h4>La GPU logra un speedup de hasta 326× sobre el Secuencial</h4>
+          <p>
+            En la grilla de 4096×4096, CUDA básico procesó cada generación en solo 0.22 ms
+            frente a los 72.45 ms de la versión secuencial. Esto es posible porque la GPU
+            puede lanzar simultáneamente millones de hilos independientes (uno por célula),
+            eliminando por completo la serialización. Para algoritmos con este patrón de
+            acceso (<em>embarrassingly parallel</em>), la GPU representa la arquitectura óptima.
+          </p>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="divider" style="margin-top:3rem;"></div>
+
+    <h3 style="margin-bottom:1rem;">Ranking de Paradigmas (4096×4096)</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Puesto</th><th>Paradigma</th><th>ms / generación</th><th>Comentario</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>🥇 1</td><td>CUDA Básico</td><td class="fastest">0.22</td><td>Paralelismo masivo GPU gana en escala</td></tr>
+          <tr><td>🥈 2</td><td>CUDA Shared Memory</td><td class="fastest">0.34</td><td>Mayor overhead de sync en tile grande</td></tr>
+          <tr><td>🥉 3</td><td>MPI 8 procesos</td><td>17.21</td><td>Menor overhead que OpenMP por proceso dedicado</td></tr>
+          <tr><td>4</td><td>OpenMP 16 hilos</td><td>17.56</td><td>Comparte caché → contención en grilla grande</td></tr>
+          <tr><td>5</td><td>MPI+OpenMP 4P×4H</td><td>23.26</td><td>Overhead de coordinación doble</td></tr>
+          <tr><td>6</td><td>Secuencial</td><td class="slowest">72.45</td><td>Baseline de referencia</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ======================== FOOTER ======================== -->
+<footer>
+  <p style="margin-bottom:.5rem;">
+    <strong style="color:var(--text)">GoL Parallel Comparison</strong> —
+    Trabajo Final • Computación Paralela en GPU
+  </p>
+  <p>
+    Código fuente disponible en
+    <a href="https://github.com/javoge/gol-parallel-comparison" target="_blank" rel="noopener">
+      github.com/javoge/gol-parallel-comparison
+    </a>
+  </p>
+  <p style="margin-top:.75rem; font-size:.8rem;">
+    Construido con HTML + CSS puro · Publicado con GitHub Pages
+  </p>
+</footer>
+
+</body>
+</html>
